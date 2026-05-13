@@ -239,6 +239,19 @@ except Exception:
     intro_sound = None
     print("Aviso: Arquivo de áudio 'intro-clash-royale.mp3' não encontrado.")
 
+# Carregar som de vitória
+try:
+    you_win_sound = pygame.mixer.Sound("assets/sounds/19-you-win.mp3")
+except Exception:
+    you_win_sound = None
+    print("Aviso: Arquivo de áudio '19-you-win.mp3' não encontrado.")
+
+try:
+    congratulations_sound = pygame.mixer.Sound("assets/sounds/mario-congratulations.mp3")
+except Exception:
+    congratulations_sound = None
+    print("Aviso: Arquivo de áudio 'mario-congratulations.mp3' não encontrado.")
+
 # Carregar imagem da tela inicial
 try:
     start_screen_img = pygame.image.load("assets/images/tela-jogo.png")
@@ -1602,6 +1615,10 @@ while run:
             # ESC na tela final da fase 2
             if victory and active_level == 1 and victory_dk_fall_done:
                 if event.key == pygame.K_ESCAPE:
+                    if you_win_sound:
+                        you_win_sound.stop()
+                    if congratulations_sound:
+                        congratulations_sound.stop()
                     game_started = False
                     if score > high_score:
                         high_score = score
@@ -1702,6 +1719,14 @@ while run:
                     peach_y_offset = 0
 
             # Mostra VICTORY! a partir do frame 60
+            if victory_timer == 61 and active_level == 1:
+                if you_win_sound:
+                    you_win_sound.play()
+            
+            if victory_timer == 335 and active_level == 1:
+                if congratulations_sound:
+                    congratulations_sound.play()
+
             if victory_timer > 60:
                 screen.blit(
                     font.render("VICTORY!", True, "yellow"),
