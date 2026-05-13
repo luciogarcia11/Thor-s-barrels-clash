@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": {
+    "ai-image-generation": {
+      "source": "infsh-skills/skills",
+      "sourceType": "github",
+      "skillPath": "tools/image/ai-image-generation/SKILL.md",
+      "computedHash": "f8d877eea404c258a064c62667b9a56aa3d98ab7ac30114eed66837046745761"
+    },
+    "game-designer": {
+      "source": "dylantarre/animation-principles",
+      "sourceType": "github",
+      "skillPath": "skills/03-by-role-persona/game-designer/SKILL.md",
+      "computedHash": "1a9671692befb9dd664ec2ebaba1fb980d0c60157e1ddaa024dfa9d9c3cf1ff8"
+    },
+    "game-engine": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "skillPath": "skills/game-engine/SKILL.md",
+      "computedHash": "20057f62cf7a8b2d9f940b3de0b18e5426e8f4bb50e236d36b1033aa0d42c4d8"
+    },
+    "pygame-patterns": {
+      "source": "ikatechis/claude-agentic-mastery",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/pygame-patterns/SKILL.md",
+      "computedHash": "451fb94c9f23fae099d8ca21b76aee63ec923b8d965ab4c8a585921ac65b6a70"
+    }
+  }
+}
