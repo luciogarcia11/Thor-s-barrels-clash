@@ -600,27 +600,31 @@ class Hammer(pygame.sprite.Sprite):
 class Barrel(pygame.sprite.Sprite):
     def __init__(self, x_pos, y_pos, falls_straight=False):
         pygame.sprite.Sprite.__init__(self)
-        self.image = pygame.Surface((50, 50))
+        self.image = barrel_img
         self.rect = self.image.get_rect()
         self.rect.center = (x_pos, y_pos)
         self.y_change = 0
-        self.x_change = 1
+        self.x_change = 3
         self.pos = 0
         self.count = 0
         self.oil_collision = False
         self.falling = False
         self.check_lad = False
-        self.falls_straight = falls_straight  # Fase 2: cai reto sem rolar
-        self.bottom = self.rect
+        self.forced_fall = False
+        self.drop_fall = False
+        self.was_on_platform = False
+        self.fall_start_y = 0
+        self.falls_straight = falls_straight
+        self.bottom = pygame.rect.Rect(
+            (self.rect[0], self.rect.bottom), (self.rect[2], 3)
+        )
 
     # ...existing code...
     def update(self, fire_trig):
-        # ── Fase 2: barril cai reto, sem rolar ──────────────────────────────
         if self.falls_straight:
             if self.y_change < 12:
                 self.y_change += 0.4
             self.rect.move_ip(0, self.y_change)
-            # Animação de rotação (visual)
             if self.count < 10:
                 self.count += 1
             else:
@@ -632,56 +636,76 @@ class Barrel(pygame.sprite.Sprite):
             if self.rect.top > screen_height:
                 self.kill()
             return fire_trig
-        # ── Fase 1: comportamento original ──────────────────────────────────
-        # Correção: Use 'self' em vez de 'barrel' para evitar erros de referência
-        if self.y_change < 8 and not self.falling:
-            self.y_change += 2
 
+        # Gravidade: rapida no chao (+2/frame, cap 8), lenta no ar (+0.3/frame, cap 5)
+        if self.falling or self.forced_fall:
+            if self.y_change < 5:
+                self.y_change += 0.3
+        else:
+            if self.y_change < 8:
+                self.y_change += 2
+
+        # Colisao com plataformas
+        on_platform = False
         for i in range(len(plats)):
             if self.bottom.colliderect(plats[i]):
-                self.y_change = 0
-                self.falling = False
+                if self.forced_fall:
+                    pass
+                else:
+                    if self.drop_fall:
+                        fall_dist = self.rect.bottom - self.fall_start_y
+                        if fall_dist > section_height:
+                            self.x_change = 3 if self.x_change < 0 else -3
+                        self.drop_fall = False
+                    self.y_change = 0
+                    self.falling = False
+                    self.check_lad = False
+                    self.was_on_platform = True
+                    if self.x_change >= 0:
+                        self.x_change = 3
+                    else:
+                        self.x_change = -3
+                on_platform = True
 
-        # --- LÓGICA DA FORNALHA (CLASH ROYALE) ---
+        # Forced_fall: apos atravessar a plataforma, ativa drop_fall
+        if self.forced_fall and not on_platform:
+            self.forced_fall = False
+            self.fall_start_y = self.rect.bottom
+            self.drop_fall = True
+
+        # Caiu da borda: entra em queda
+        if not on_platform and not self.falling and not self.forced_fall:
+            self.falling = True
+            self.fall_start_y = self.rect.bottom
+            if self.was_on_platform:
+                self.drop_fall = True
+
+        # Fornalha
         if self.rect.colliderect(oil_drum):
             if not self.oil_collision:
                 self.oil_collision = True
-                # Sorteio para ver se vira fogo
                 if random.randint(0, 4) == 4:
                     global fornalha_atual, timer_fornalha
-
-                    # 1. Ativa o nascimento do fogo
                     fire_trig = True
-
-                    # 2. Troca a imagem para a Fornalha 2 (Apontando braço)
                     fornalha_atual = fornalha_ativa
-
-                    # 3. Define o tempo de 3 segundos (180 frames a 60fps)
                     timer_fornalha = 180
-
-                    # 4. Remove o barril pois ele "entrou" na fornalha
                     self.kill()
 
-        # Movimentação lateral do barril
-        if not self.falling:
-            if (
-                row5_top >= self.rect.bottom
-                or row3_top >= self.rect.bottom >= row4_top
-                or row1_top > self.rect.bottom >= row2_top
-            ):
-                self.x_change = 3
-            else:
-                self.x_change = -3
-        else:
+        # Movimento: velocidade cheia rolando, metade caindo, zero no forced_fall
+        if self.falling:
+            if self.x_change > 0:
+                self.x_change = 1.5
+            elif self.x_change < 0:
+                self.x_change = -1.5
+        elif self.forced_fall:
             self.x_change = 0
 
         self.rect.move_ip(self.x_change, self.y_change)
 
-        # Destruição do barril ao sair da tela
         if self.rect.top > screen_height:
             self.kill()
 
-        # Animação do barril rolando
+        # Animacao
         if self.count < 15:
             self.count += 1
         else:
@@ -695,10 +719,7 @@ class Barrel(pygame.sprite.Sprite):
             (self.rect[0], self.rect.bottom), (self.rect[2], 3)
         )
 
-        # Retorna o gatilho para o loop principal criar a bola de fogo
         return fire_trig
-
-    # ...existing code...
 
     def check_fall(self):
         already_collided = False
@@ -710,9 +731,12 @@ class Barrel(pygame.sprite.Sprite):
             if below.colliderect(lad) and not self.falling and not self.check_lad:
                 self.check_lad = True
                 already_collided = True
-                if random.randint(0, 60) == 60:
+                if random.randint(0, 200) == 200:
                     self.falling = True
-                    self.y_change = 4
+                    self.forced_fall = True
+                    self.drop_fall = True
+                    self.y_change = 2
+                    self.fall_start_y = self.rect.bottom
         if not already_collided:
             self.check_lad = False
 
@@ -1270,7 +1294,7 @@ def draw_kong():
             dk_img = dk3
         else:
             dk_img = pygame.transform.flip(dk1, True, False)
-            screen.blit(barrel_img, (250, 250))
+            screen.blit(barrel_img, (int(6 * section_width), int(row6_y - 4 * slope - 2 * section_height)))
         screen.blit(dk_img, (int(3.5 * section_width), int(row6_y - 5.5 * section_height)))
 
 
@@ -1525,8 +1549,10 @@ while run:
         barrel_count = random.randint(0, 120)
         barrel_time = barrel_spawn_time - barrel_count
         if active_level == 0:
-            # Fase 1: barril spawna no DK e rola pelas plataformas
-            barrel = Barrel(270, 270)
+            platform_y = int(row6_y - 4 * slope)
+            spawn_x = int(5.0 * section_width)
+            spawn_y = platform_y - section_height
+            barrel = Barrel(spawn_x, spawn_y)
             barrels.add(barrel)
             if barrel_sound:
                 barrel_sound.play()
