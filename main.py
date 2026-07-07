@@ -268,7 +268,7 @@ active_level = 0
 counter = 0
 score = 0
 high_score = 0
-lives = 5
+lives = 3
 bonus = 6000
 first_fireball_trigger = False
 victory = False
@@ -423,6 +423,8 @@ levels = [
             # Martelos em posições diferentes da fase 1
             (23, row5_top + section_height + 30),
             (2, row3_top + section_height + 40),
+            # Martelo na plataforma do DK (para a batalha)
+            (14, row6_y - 4 * section_height + section_height + 10),
         ],
         "goblins": [
             # (x_section, platform_y, patrol_left_section, patrol_right_section)
@@ -430,6 +432,7 @@ levels = [
             (3, row3_y, 3, 9),  # esquerda – plataforma row3
             (26, row4_y, 23, 28),  # direita   – plataforma row4
         ],
+        "blocked_ladders": [8, 9],  # escadas bloqueadas até derrotar o DK
         "target": (10, row6_y - 4 * section_height, 6),
     },
 ]
@@ -453,6 +456,13 @@ victory_dk_fall_done = False
 victory_timer = 0
 peach_y_offset = 0
 
+# ── Boss fight state (Fase 2) ─────────────────────────────────────────────────
+dk_boss_mode = False      # ativado quando o jogador chega no nível do DK
+dk_health = 3             # vida do DK (3 marteladas para matar)
+dk_defeated = False       # DK derrotado?
+dk_invincible_timer = 0   # invencibilidade pós-martelada (piscar)
+dk_stun_timer = 0         # atordoamento pós-knockback
+
 
 class Player(pygame.sprite.Sprite):
     def __init__(self, x_pos, y_pos):
@@ -470,6 +480,9 @@ class Player(pygame.sprite.Sprite):
         self.max_hammer = 450
         self.hammer_len = self.max_hammer
         self.hammer_pos = 1
+        self.hammer_swing_timer = 0
+        self.boss_hp = 3       # corações na batalha contra o DK
+        self.boss_iframe = 0   # invencibilidade pós-dano do DK
         self.rect = self.image.get_rect()
         self.hitbox = self.rect
         self.hammer_box = self.rect
@@ -503,14 +516,27 @@ class Player(pygame.sprite.Sprite):
                     self.pos = 0
         else:
             self.pos = 0
+        if self.boss_iframe > 0:
+            self.boss_iframe -= 1
         if self.hammer:
-            self.hammer_pos = (self.hammer_len // 30) % 2
-            self.hammer_len -= 1
-            if self.hammer_len == 0:
-                self.hammer = False
-                self.hammer_len = self.max_hammer
+            if active_level != 1:
+                # Fase 1: alterna automático e decai
+                self.hammer_pos = (self.hammer_len // 30) % 2
+                self.hammer_len -= 1
+                if self.hammer_len == 0:
+                    self.hammer = False
+                    self.hammer_len = self.max_hammer
+            else:
+                # Fase 2: baseado em clique (mouse)
+                if self.hammer_swing_timer > 0:
+                    self.hammer_swing_timer -= 1
+                # Ataque só nos primeiros ~10 frames (timer > 50)
+                self.hammer_pos = 0 if self.hammer_swing_timer > 50 else 1
 
     def draw(self):
+        # Piscar quando toma dano do DK
+        if self.boss_iframe > 0 and self.boss_iframe // 3 % 2 == 0:
+            return
         if not self.hammer:
             if not self.climbing and self.landed:
                 if self.pos == 0:
@@ -1109,9 +1135,13 @@ def draw_screen():
     ladders = levels[active_level]["ladders"]
     bridges = levels[active_level]["bridges"]
     broken_ladders = levels[active_level].get("broken_ladders", [])
+    blocked_ladders = levels[active_level].get("blocked_ladders", [])
 
-    for ladder in ladders:
+    for i, ladder in enumerate(ladders):
         ladder_objs.append(Ladder(*ladder))
+        # Escadas bloqueadas: só ficam acessíveis depois de derrotar o DK
+        if i in blocked_ladders and not dk_defeated:
+            continue
         if ladder[2] >= 3:
             climbers.append(ladder_objs[-1].body)
     for bridge in bridges:
@@ -1211,6 +1241,7 @@ def draw_kong():
     global dk_walk_x, dk_walk_state, dk_walk_target, dk_drop_timer
     global dk_idle_timer, dk_dir, dk_drop_signal, dk_drop_x
     global dk_falling_victory, dk_fall_y, victory_dk_fall_done
+    global dk_boss_mode, dk_defeated, dk_invincible_timer, dk_stun_timer
 
     dk_y = int(row6_y - 5.5 * section_height)
     
@@ -1223,7 +1254,36 @@ def draw_kong():
         return
 
     if active_level == 1:
-        # ── Fase 2: DK anda aleatoriamente e solta barris ───────────────────
+        # ── Boss mode: DK anda agressivamente, sem soltar barris ──────────
+        if dk_boss_mode and not dk_defeated:
+            DK_BOSS_SPEED = 3
+            if dk_stun_timer > 0:
+                DK_BOSS_SPEED = 1  # lento enquanto atordoado
+                dk_stun_timer -= 1
+            boss_left = int(3 * section_width)
+            boss_right = int(25 * section_width)
+            dk_walk_x += DK_BOSS_SPEED * dk_dir
+            if dk_walk_x >= boss_right:
+                dk_walk_x = boss_right
+                dk_dir = -1
+            elif dk_walk_x <= boss_left:
+                dk_walk_x = boss_left
+                dk_dir = 1
+            tick = pygame.time.get_ticks() // 120
+            base_img = [dk1, dk4][tick % 2]
+            dk_draw_img = pygame.transform.flip(base_img, True, False) if dk_dir == 1 else base_img
+            # Piscar quando toma dano
+            if dk_invincible_timer > 0:
+                dk_invincible_timer -= 1
+                if dk_invincible_timer // 3 % 2 == 0:
+                    screen.blit(dk_draw_img, (dk_walk_x, dk_y))
+                else:
+                    pass  # invisível no flash
+            else:
+                screen.blit(dk_draw_img, (dk_walk_x, dk_y))
+            return
+
+        # ── Fase 2 modo normal: DK anda aleatoriamente e solta barris ───
         if dk_walk_state == "idle":
             dk_idle_timer -= 1
             if dk_idle_timer <= 0:
@@ -1342,6 +1402,7 @@ def reset():
     global dk_walk_x, dk_walk_state, dk_idle_timer, dk_drop_signal, dk_dir
     global dk_falling_victory, dk_fall_y, victory_dk_fall_done
     global victory_timer, peach_y_offset
+    global dk_boss_mode, dk_health, dk_defeated, dk_invincible_timer, dk_stun_timer
     pygame.time.delay(1000)
     for bar in barrels:
         bar.kill()
@@ -1372,6 +1433,12 @@ def reset():
     dk_falling_victory = False
     dk_fall_y = int(window_height - section_height * 34)
     victory_dk_fall_done = False
+    # Reseta estado da batalha (DK reseta HP quando morre)
+    dk_boss_mode = False
+    dk_health = 3
+    dk_defeated = False
+    dk_invincible_timer = 0
+    dk_stun_timer = 0
     # Reinicia goblins e lanças
     for g in goblins:
         g.kill()
@@ -1388,6 +1455,7 @@ def advance_level():
     global dk_walk_x, dk_walk_state, dk_idle_timer, dk_drop_signal, dk_dir
     global dk_falling_victory, dk_fall_y, victory_dk_fall_done
     global victory_timer, peach_y_offset
+    global dk_boss_mode, dk_health, dk_defeated, dk_invincible_timer, dk_stun_timer
     pygame.time.delay(1500)
     active_level += 1
     for bar in barrels:
@@ -1418,6 +1486,11 @@ def advance_level():
     dk_falling_victory = False
     dk_fall_y = int(window_height - section_height * 34)
     victory_dk_fall_done = False
+    dk_boss_mode = False
+    dk_health = 3
+    dk_defeated = False
+    dk_invincible_timer = 0
+    dk_stun_timer = 0
     # Fase 2: começa já com múltiplas flames para aumentar dificuldade
     n_flames = level_difficulty[active_level]["initial_flames"]
     for _ in range(n_flames):
@@ -1542,7 +1615,10 @@ while run:
     oil_drum = draw_extras()
     climb, down = check_climb()
     if not victory:  # Não sobrescreve depois que já foi ativado
-        victory = check_victory()
+        if active_level == 1 and not dk_defeated:
+            victory = False
+        else:
+            victory = check_victory()
     if barrel_count < barrel_spawn_time:
         barrel_count += 1
     else:
@@ -1566,7 +1642,7 @@ while run:
             timer_fornalha = 180  # 3 segundos (60 fps * 3)
 
     # ── Fase 2: spawn do barril quando DK o solta ────────────────────────────
-    if active_level == 1 and dk_drop_signal:
+    if active_level == 1 and dk_drop_signal and not dk_boss_mode:
         drop_px = int(dk_drop_x + 2 * section_width)  # centro do barril
         drop_py = int(row6_y - 3 * section_height)  # logo abaixo do DK
         barrel_lvl2 = Barrel(drop_px, drop_py, falls_straight=True)
@@ -1600,6 +1676,52 @@ while run:
     player.draw()
     for ham in hammers:
         ham.draw()
+
+    # ── Boss fight DK (Fase 2) ──────────────────────────────────────────────
+    if active_level == 1:
+        dk_rect = pygame.Rect(dk_walk_x, int(row6_y - 5.5 * section_height), section_width * 5, section_height * 5)
+        dk_rect.y = dk_rect.y + section_height * 2  # ajuste fino da hitbox
+        dk_rect.h = section_height * 3
+
+        # Ativar boss mode quando o jogador chega no nível do DK
+        if not dk_boss_mode and not dk_defeated:
+            if player.rect.centery <= dk_rect.centery + section_height * 4:
+                dk_boss_mode = True
+
+        if dk_boss_mode and not dk_defeated and not dk_falling_victory:
+            # DK acerta o jogador: perde 1 coração (se não tiver martelo ou martelo pra cima)
+            dano = False
+            if player.hammer and player.hammer_pos == 1:
+                dano = True
+            if not player.hammer:
+                dano = True
+            if dano and player.hitbox.colliderect(dk_rect) and player.boss_iframe <= 0:
+                player.boss_hp -= 1
+                player.boss_iframe = 45  # 0.75s invencível + piscando
+                if player.boss_hp <= 0:
+                    reset_game = True
+
+        # Martelo pra baixo (hammer_pos == 0): acerta o DK
+        if dk_boss_mode and not dk_defeated and player.hammer and player.hammer_pos == 0 and dk_invincible_timer <= 0:
+            if player.hammer_box.colliderect(dk_rect):
+                dk_health -= 1
+                dk_invincible_timer = 30  # 0.5s piscando
+                # Knockback no DK (empurrão forte + atordoamento)
+                push_dir = 1 if player.rect.centerx < dk_rect.centerx else -1
+                dk_walk_x += push_dir * 200
+                dk_dir = -push_dir
+                dk_stun_timer = 60  # 1s andando devagar
+                if dk_health <= 0:
+                    dk_defeated = True
+                    dk_falling_victory = True
+                    dk_fall_y = int(row6_y - 5.5 * section_height)
+
+        # Martelo acerta goblins (só com hammer_pos == 0)
+        if player.hammer and player.hammer_pos == 0:
+            for goblin in list(goblins):
+                if player.hammer_box.colliderect(goblin.rect):
+                    goblin.kill()
+                    score += 200
 
     # ── Goblins e lanças (fase 2) ─────────────────────────────────────────
     if active_level == 1:
@@ -1636,21 +1758,21 @@ while run:
                     active_level = 0
                     reset()
             if not victory:
-                if event.key == pygame.K_RIGHT and not player.climbing:
+                if (event.key == pygame.K_RIGHT or event.key == pygame.K_d) and not player.climbing:
                     player.x_change = 1
                     player.dir = 1
-                if event.key == pygame.K_LEFT and not player.climbing:
+                if (event.key == pygame.K_LEFT or event.key == pygame.K_a) and not player.climbing:
                     player.x_change = -1
                     player.dir = -1
                 if event.key == pygame.K_SPACE and player.landed:
                     player.landed = False
                     player.y_change = -6
-                if event.key == pygame.K_UP:
+                if event.key == pygame.K_UP or event.key == pygame.K_w:
                     if climb:
                         player.y_change = -2
                         player.x_change = 0
                         player.climbing = True
-                if event.key == pygame.K_DOWN:
+                if event.key == pygame.K_DOWN or event.key == pygame.K_s:
                     if down:
                         player.y_change = 2
                         player.x_change = 0
@@ -1660,20 +1782,24 @@ while run:
                     advance_level()
         if event.type == pygame.KEYUP:
             if not victory:  # Bloqueia soltar teclas de movimento durante vitória
-                if event.key == pygame.K_RIGHT:
+                if event.key == pygame.K_RIGHT or event.key == pygame.K_d:
                     player.x_change = 0
-                if event.key == pygame.K_LEFT:
+                if event.key == pygame.K_LEFT or event.key == pygame.K_a:
                     player.x_change = 0
-                if event.key == pygame.K_UP:
+                if event.key == pygame.K_UP or event.key == pygame.K_w:
                     if climb:
                         player.y_change = 0
                     if player.climbing and player.landed:
                         player.climbing = False
-                if event.key == pygame.K_DOWN:
+                if event.key == pygame.K_DOWN or event.key == pygame.K_s:
                     if climb:
                         player.y_change = 0
                     if player.climbing and player.landed:
                         player.climbing = False
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1 and player.hammer and not victory:
+                if player.hammer_swing_timer <= 0:
+                    player.hammer_swing_timer = 60
     if victory:
         victory_timer += 1
 
@@ -1734,21 +1860,14 @@ while run:
                     (window_width // 2 - 150, window_height // 2),
                 )
 
-            # FASE 2: após 240 frames -> DK cai e espera ESC
-            if active_level == 1 and victory_timer > 240:
-                peach_y_offset = 0
-                if not dk_falling_victory:
-                    dk_falling_victory = True
-                    dk_fall_y = int(row6_y - 5.5 * section_height)
+            # FASE 2: espera DK cair (se já não caiu) e mostra ESC
+            if active_level == 1 and victory_timer > 120:
                 if victory_dk_fall_done:
-                    screen.blit(
-                        font.render("VICTORY!", True, "yellow"),
-                        (window_width // 2 - 150, window_height // 2),
-                    )
                     screen.blit(
                         font2.render("Pressione ESC para voltar ao Inicio", True, "white"),
                         (window_width // 2 - 260, window_height // 2 + 70),
                     )
+                    # ESC handling já está no KEYDOWN acima
 
     pygame.display.flip()
 pygame.quit()
